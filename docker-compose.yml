@@ -1,0 +1,212 @@
+version: "2"
+
+services:
+  openvpn-client:
+    container_name: openvpn-client
+    image: ekristen/openvpn-client
+    command: --config /vpn/ibVPN_Italy_Arezzo_1.ovpn --askpass /vpn/user_pass.txt --auth-nocache
+    cap_add:
+      - NET_ADMIN
+    devices:
+      - "/dev/net/tun:/dev/net/tun"
+    volumes:
+      - /mnt/data1/configs/ibvpn:/vpn
+
+  openvpn-router:
+    container_name: openvpn-router
+    image: ekristen/openvpn-router
+    command: --network custom_default --nat-source 172.249.1.0/24 --route 10.10.100.0/24
+    restart: always
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+    depends_on:
+      - openvpn-client
+
+  nginx:
+    container_name: nginx
+    image: linuxserver/nginx:latest
+    restart: always
+    volumes:
+      - ${CONFIG_DIR}/nginx:/config
+    environment:
+      - PUID=${DEFAULT_PUID}
+      - PGID=${DEFAULT_PGID}
+      - TZ=${TIMEZONE}
+    ports:
+      - 80:80
+      - 443:443
+    depends_on:
+      - openvpn-router
+
+  jd2:
+    container_name: jd2
+    image: plusminus/jdownloader2-headless
+    restart: always
+    volumes:
+      - ${CONFIG_DIR}/jdownloader/:/opt/JDownloader/cfg
+      - ${DOWNLOADS_DIR}/jd:/root
+    depends_on:
+      - openvpn-router
+
+  # NZBGET
+  nzbget:
+    container_name: nzbget
+    image: linuxserver/nzbget:latest
+    restart: always
+    volumes:
+      - ${CONFIG_DIR}/nzbget:/config
+      - ${DOWNLOADS_DIR}:/downloads
+    environment:
+      - PUID=${DEFAULT_PUID}
+      - PGID=${DEFAULT_PGID}
+      - TZ=${TIMEZONE}
+    ports:
+      - 6789:6789
+    depends_on:
+      - openvpn-router
+
+  #Radarr
+  radarr:
+    container_name: radarr
+    image: linuxserver/radarr:latest
+    restart: always
+    volumes:
+      - ${MOVIES_DIR}:/movies
+      - ${CONFIG_DIR}/radarr:/config
+      - ${DOWNLOADS_DIR}:/downloads
+      - /etc/localtime:/etc/localtime:ro
+    environment:
+      - PUID=${DEFAULT_PUID}
+      - PGID=${DEFAULT_PGID}
+      - TZ=${TIMEZONE}
+    ports:
+      - 7879:7878
+    depends_on:
+      - openvpn-router
+
+  #Sonarr
+  sonarr:
+    container_name: sonarr
+    image: linuxserver/sonarr:latest
+    restart: always
+    volumes:
+      - ${CONFIG_DIR}/sonarr:/config
+      - ${DOWNLOADS_DIR}:/downloads
+      - /etc/localtime:/etc/localtime:ro
+      - ${TV_SHOW_DIR}:/tv
+    environment:
+      - PUID=${DEFAULT_PUID}
+      - PGID=${DEFAULT_PGID}
+      - TZ=${TIMEZONE}
+    ports:
+      - 8989:8989
+    depends_on:
+      - openvpn-router
+
+  #Transmission
+  transmission:
+    container_name: transmission
+    image: linuxserver/transmission:latest
+    restart: always
+    volumes:
+      - ${CONFIG_DIR}/transmission:/config
+      - ${DOWNLOADS_DIR}:/downloads
+      - ${TORRENTS_DIR}:/watch
+    environment:
+      - PUID=${DEFAULT_PUID}
+      - PGID=${DEFAULT_PGID}
+      - TZ=${TIMEZONE}
+    ports:
+      - 51413:51413
+      - 51413:51413/udp
+      - 9091:9091
+    depends_on:
+      - openvpn-router
+
+  hydra1:
+    container_name: hydra
+    image: linuxserver/hydra:latest
+    restart: always
+    volumes:
+      - ${CONFIG_DIR}/hydra:/config
+      - ${DOWNLOADS_DIR}:/downloads
+    environment:
+      - PUID=${DEFAULT_PUID}
+      - PGID=${DEFAULT_PGID}
+      - TZ=${TIMEZONE}
+    ports:
+      - 5075:5075
+    depends_on:
+      - openvpn-router
+
+  lidarr:
+    container_name: lidarr
+    image: linuxserver/lidarr
+    restart: always
+    volumes:
+      - ${CONFIG_DIR}/lidarr:/config
+      - ${DOWNLOADS_DIR}:/downloads
+      - ${MP3_DIR}:/music
+    environment:
+      - PUID=${DEFAULT_PUID}
+      - PGID=${DEFAULT_PGID}
+      - TZ=${TIMEZONE}
+    ports:
+      - 8686:8686
+    depends_on:
+      - openvpn-router
+
+  plex:
+    container_name: plex
+    image: plexinc/pms-docker
+    restart: always
+    volumes:
+      - ${MOVIES_DIR}:/data/movies
+      - ${CONFIG_DIR}/plex:/config
+      - ${TRANSCODE_DIR}:/transcode
+      - ${MP3_DIR}:/data/mp3
+      - ${TV_SHOW_DIR}:/data/tvshows
+    devices:
+      - /dev/dri:/dev/dri
+    environment:
+      - PLEX_UID=0
+      - PLEX_GID=0
+      - TZ=${TIMEZONE}
+    network_mode: "host"
+    depends_on:
+      - openvpn-router
+  tautulli:
+    container_name: tautulli
+    image: tautulli/tautulli
+    restart: always
+    environment:
+      - PGID=${DEFAULT_PGID}
+      - PUID=${DEFAULT_PUID}
+      - TZ=${TIMEZONE}
+    volumes:
+      - ${CONFIG_DIR}/plexpy:/config
+      - ${CONFIG_DIR}/plex/logs:/plex_logs:ro
+    ports:
+      - 8181:8181
+  mqtt:
+    container_name: mqtt
+    image: toke/mosquitto
+    restart: always
+    environment:
+      - TZ=${TIMEZONE}
+    ports:
+      - 1883:1883
+      - 9001:9001
+    volumes:
+      - ${CONFIG_DIR}/mqtt/config:/mqtt/config:ro
+      - ${CONFIG_DIR}/mqtt/log
+      - ${CONFIG_DIR}/mqtt/data/:/mqtt/data/
+
+networks:
+  default:
+    ipam:
+      driver: default
+      config:
+        - subnet: 172.249.0.0/16
+          ip_range: 172.249.1.0/24
+          gateway: 172.249.1.254
